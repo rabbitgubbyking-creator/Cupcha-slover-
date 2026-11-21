@@ -4,49 +4,92 @@ import argparse
 import json
 import sys
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+
 
 CATEGORIES = ("text", "image_tiles", "slider", "checkbox", "other")
 
 
-def choose(prompt: str, optional: bool = False) -> str | None:
-    options = ", ".join(CATEGORIES)
+def ask_category(prompt: str, optional: bool = False) -> str | None:
+    choices = ", ".join(CATEGORIES)
+
     while True:
-        value = input(f"{prompt} ({options})" + (" or Enter to skip: " if optional else ": "))
-        value = value.strip().lower()
-        if optional and not value:
+        suffix = " (press Enter to skip)" if optional else ""
+        answer = input(f"{prompt} [{choices}]{suffix}: ").strip().lower()
+
+        if optional and not answer:
             return None
-        if value in CATEGORIES:
-            return value
-        print("Choose one of the listed categories.")
+        if answer in CATEGORIES:
+            return answer
+
+        print("That category is not on the list. Try again.")
+
+
+def validate_server_url(value: str) -> str:
+    value = value.rstrip("/")
+    parsed = urlsplit(value)
+    local_hosts = {"localhost", "127.0.0.1", "::1"}
+
+    if not parsed.hostname:
+        raise ValueError("Enter a full server URL, including https://.")
+    if parsed.scheme != "https" and not (
+        parsed.scheme == "http" and parsed.hostname in local_hosts
+    ):
+        raise ValueError("Use HTTPS for a hosted server. HTTP is allowed on localhost only.")
+    if parsed.username or parsed.password:
+        raise ValueError("Do not put login details in the server URL.")
+
+    return value
+
+
+def send_feedback(server: str, payload: dict[str, str | None]) -> None:
+    data = json.dumps(payload).encode("utf-8")
+    request = Request(
+        f"{server}/api/feedback",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    with urlopen(request, timeout=15) as response:
+        print(response.read().decode("utf-8"))
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Send optional category feedback")
-    parser.add_argument("--server", required=True, help="Community server URL, e.g. https://example.com")
-    parser.add_argument("--version", default="0.1.0", help="Client version")
+    parser = argparse.ArgumentParser(
+        description="Send a manually reviewed challenge-category report."
+    )
+    parser.add_argument("--server", required=True, help="Feedback server URL")
+    parser.add_argument("--version", default="0.2.0", help="Client version")
     args = parser.parse_args()
 
-    actual = choose("What kind of challenge did you see")
-    predicted = choose("What category did the detector show", optional=True)
-
-    payload = json.dumps({
-        "category": actual,
-        "predicted_category": predicted,
-        "app_version": args.version[:30],
-    }).encode("utf-8")
-
-    url = args.server.rstrip("/") + "/api/feedback"
-    request = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with urlopen(request, timeout=15) as response:
-            print(response.read().decode("utf-8"))
-        return 0
-    except HTTPError as exc:
-        print(f"Server rejected the feedback: HTTP {exc.code}", file=sys.stderr)
-    except (URLError, TimeoutError) as exc:
-        print(f"Could not reach the server: {exc}", file=sys.stderr)
-    return 1
+        server = validate_server_url(args.server)
+        category = ask_category("Which type of challenge did you see")
+        predicted = ask_category(
+            "Which type did the detector report", optional=True
+        )
+        send_feedback(
+            server,
+            {
+                "category": category,
+                "predicted_category": predicted,
+                "app_version": args.version[:30],
+            },
+        )
+    except (HTTPError, URLError, TimeoutError) as error:
+        print(f"Could not send feedback: {error}", file=sys.stderr)
+        return 1
+    except (ValueError, KeyboardInterrupt) as error:
+        if isinstance(error, KeyboardInterrupt):
+            print("\nCancelled.", file=sys.stderr)
+        else:
+            print(error, file=sys.stderr)
+        return 1
+
+    print("Feedback saved. Thanks for helping with the category data.")
+    return 0
 
 
 if __name__ == "__main__":
