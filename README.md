@@ -1,62 +1,73 @@
-# CAPTCHA Community Feedback
+# CAPTCHA Feedback
 
-A small, privacy-conscious feedback service that helps a community measure how well a **challenge-type detector** categorizes CAPTCHA interfaces over time.
+A small Python service for collecting manually submitted CAPTCHA category feedback.
 
-This is deliberately not a CAPTCHA solver. It does not recognize answers, submit responses, approve challenges, or bypass anti-bot checks.
+It is for testing how well a program identifies the *type* of challenge, such as a
+text prompt or an image grid. It does not solve challenges, submit answers, or approve
+verification checks. It also does not collect challenge screenshots or answer text.
 
-## What improves over time
+## What gets saved
 
-People can optionally report the broad category they saw and the category a detector displayed. The service aggregates these votes and builds a category confusion matrix. This helps maintainers see which categories are commonly misclassified and where a future, human-reviewed detector update is needed.
+Each report contains:
 
-The current release collects feedback and analytics only. It does not train or update a model automatically.
+- The category selected by the person submitting the report.
+- The category shown by the detector, if there was one.
+- The client version and the time of submission.
 
-## Privacy
+The database does not store IP addresses, screenshots, browser cookies, tokens, or
+account names. The server uses the connecting IP address temporarily for a basic
+submission limit. Your hosting provider may also keep its own request logs, so check
+its privacy settings before inviting other people to use a hosted copy.
 
-The API stores only:
-- The manually selected category.
-- An optional detector category for comparison.
-- The client version and timestamp.
-
-It does **not** accept screenshots, CAPTCHA text, challenge answers, browser cookies, tokens, usernames, or account details. IP addresses are used transiently for rate limiting and are not stored in the database. Users should never submit private screenshots or account information.
-
-## Run the API in Termux or on a server
-
-Python 3.10 or newer is recommended.
+## Install on Termux
 
 ```sh
 pkg update
 pkg install python
+
 git clone https://github.com/rabbitgubbyking-creator/Cupcha-slover-.git
 cd Cupcha-slover-
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+```
+
+Start the server on the phone:
+
+```sh
 uvicorn server:app --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000` locally. API documentation is at `/docs`.
+Open `http://127.0.0.1:8000` in your browser. The API page is at
+`http://127.0.0.1:8000/docs`.
 
-For multiple people to contribute, the API must be deployed on a server with persistent storage and an HTTPS URL. Do not expose a local development server directly to the public internet. Back up `data/feedback.sqlite3`.
-
-## Submit feedback
-
-In another Termux session:
+In a second Termux session, send a report:
 
 ```sh
 python contribute.py --server http://127.0.0.1:8000
 ```
 
-When using a hosted instance, replace the URL with its HTTPS address.
+## Let other people submit reports
 
-## View community stats
+The local address above only works on your phone. To accept reports from other
+people, deploy the API to a host with HTTPS and persistent storage. Set
+`CAPTCHA_FEEDBACK_DB` to a writable location on that host and back up the SQLite
+database regularly.
 
-Open `/api/stats` on the server. It reports category totals, comparisons, and the observed match rate for human-reported predictions. This rate is descriptive and should not be treated as a validated accuracy score unless the feedback sample is reviewed for quality.
+The built-in rate limiter is intended for a small, single-process deployment. It
+keeps temporary counters in memory, so the counters reset when the server restarts
+and are not shared between multiple workers. For a larger public deployment, use
+rate limiting at the hosting proxy or a shared store such as Redis.
 
-## API
+## View the results
 
-- `GET /` — service status and privacy note.
-- `GET /api/categories` — allowed categories.
-- `POST /api/feedback` — submit one manually reviewed category.
-- `GET /api/stats` — aggregate community metrics.
+Open `/api/stats`. It shows the number of reports for each category and a table
+comparing detector labels with the categories people submitted.
 
-## License
+The reported match rate is only a rough community metric. Reports are not independently
+verified, so it should not be presented as a tested model-accuracy score. This version
+collects data; it does not train or update a machine-learning model.
 
-No license has been added yet. Add a license before accepting outside contributions.
+## Main files
+
+- `server.py` — FastAPI app and SQLite storage.
+- `contribute.py` — command-line form for submitting a report.
+- `requirements.txt` — Python packages.
